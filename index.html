@@ -458,7 +458,7 @@ body {
   });
   var player = karts[0], p2 = karts[1];
   function humans() { return twoP ? [player, p2] : [player]; }
-  window.mochi = { karts: karts, roll: function (rank, n) { var c = {}, k = { rank: rank }; raceT = 99; thunderCount = -1e9; for (var i = 0; i < n; i++) { var it = randomItem(k); c[it] = (c[it] || 0) + 1; } thunderCount = 0; return c; }, redraw: function () { cams.forEach(function (c) { c.h = c.k.h; c.y = c.k.alt; }); cam(cams[0], 0.016); draw(camera); }, P: function (i) { return P[i]; }, H: function (i) { return H[i]; }, camAspect: function () { return camera.aspect; }, park: function () { return park; }, NR: function (i) { return NR[i]; }, snapCam: function () { cams.forEach(function (c) { c.h = c.k.h; c.y = c.k.alt; }); }, cuts: function () { return cuts; }, goCut: function (n) { var c = cuts[n], m = c.forkM + 2; player.total += c.ia + m - player.idx; player.idx = c.ia + m; player.speed = 60; player.x = c.pts[m].x; player.z = c.pts[m].z; player.h = c.pts[m].ry; player.cut = c; player.ci = m; },
+  window.mochi = { karts: karts, roll: function (rank, n) { var c = {}, k = { rank: rank }; raceT = 99; thunderCount = -1e9; for (var i = 0; i < n; i++) { var it = randomItem(k); c[it] = (c[it] || 0) + 1; } thunderCount = 0; return c; }, redraw: function () { cams.forEach(function (c) { c.h = c.k.h; c.y = c.k.alt; }); cam(cams[0], 0.016); draw(camera); }, P: function (i) { return P[i]; }, H: function (i) { return H[i]; }, camAspect: function () { return camera.aspect; }, view: function (v) { viewAt = v; }, park: function () { return park; }, NR: function (i) { return NR[i]; }, snapCam: function () { cams.forEach(function (c) { c.h = c.k.h; c.y = c.k.alt; }); }, cuts: function () { return cuts; }, goCut: function (n) { var c = cuts[n], m = c.forkM + 2; player.total += c.ia + m - player.idx; player.idx = c.ia + m; player.speed = 60; player.x = c.pts[m].x; player.z = c.pts[m].z; player.h = c.pts[m].ry; player.cut = c; player.ci = m; },
     sep: function () { var best = 1e9; for (var i = 0; i < N; i += 4) for (var j = i + 80; j < N; j += 4) { if (i + N - j < 80) continue; var d = Math.hypot(P[i].x - P[j].x, P[i].z - P[j].z); if (d < best) best = d; } return Math.round(best); }, hz: function () { return hazards.length; }, use: function (i, it) { karts[i].item = it; useItem(karts[i]); },
     tick: function (n) { while (n-- > 0) step(1 / 60); return { balls: balls.length, bananas: oils.length, bolts: bolts.length }; } };
 
@@ -472,7 +472,7 @@ body {
     k.drift = 0; k.charge = 0; k.slowT = 0; k.starT = 0; k.bulletT = 0; k.sc = 1; k.squash = 0; k.finished = false; k.finishTime = 0;
     k.offset = (Math.random() * 2 - 1) * 10; k.itemTimer = 0; k.rank = order + 1;
     if (k.hook && k.hook.rope.parent) k.hook.rope.parent.remove(k.hook.rope);
-    k.hook = null; k.bounce = false; k.lastDrift = false; k.launchH = undefined;
+    k.hook = null; k.bounce = false; k.guide = false; k.lastDrift = false; k.launchH = undefined;
   }
 
   // ---------- items ----------
@@ -774,7 +774,7 @@ body {
   }
   function respawn(k) {                        // off the course: lowered back on to the road where it left
     if (k.hook) unhook(k, false);
-    k.bounce = false;
+    k.bounce = false; k.guide = false;
     var sp = k.safe, p = sp.cut ? sp.cut.pts[sp.ci] : null;
     k.cut = sp.cut; k.ci = sp.ci; k.idx = sp.idx; k.total = sp.total;
     k.x = p ? p.x : P[sp.idx].x; k.z = p ? p.z : P[sp.idx].z; k.h = p ? p.ry : Math.atan2(T[sp.idx].x, T[sp.idx].z);
@@ -1805,8 +1805,52 @@ body {
   }
 
   // ---------- もちもちワンダーパーク: a sweets park floating above the clouds ----------
-  // The course is one closed loop like every stage, but it is laid out by hand in 3D: the high road runs right
-  // above the start straight, so "which road is under the kart" always takes the kart's height into account here.
+  // The park is one world meant to hold several courses. Its landmarks sit at fixed spots on a shared map (WP_MAP)
+  // and are built by reusable parts (wpIsland, wpCakeTower, wpPlaza, ...). A course is a hand-laid 3D path through
+  // that map plus where its rides go (WP_COURSES). Roads can pass right over other roads here (the spiral round the
+  // cake tower stacks them), so "which road is under the kart" always takes the kart's height into account.
+  var WP_MAP = {
+    plaza: { x: -470, z: 0, y: 18.4, r: 105 },        // start plaza, front left
+    tower: { x: 0, z: -220, y: 12, r: 135 },          // the great cake tower on its island, in the middle
+    hookIsle: { x: 300, z: 20, y: 60, r: 108 },       // the mochi-hook tower
+    wheel: { x: 585, z: 20, y: 44, r: 92 },           // Ferris-wheel island, right
+    loopIsle: { x: -45, z: 262, y: 36, r: 104 },      // the island the bridge shortcut flies over
+    sauce: { x: -560, z: 80, y: 10, r: 54 },          // strawberry-sauce tower
+    hops: [[-262, 8, 17, 44], [-150, -70, 18, 40]],   // stepping-stone islands under the road to the tower
+    attract: [[-300, 182, 28, 56], [-470, 176, 12, 66]],   // islands of the attraction area
+    // big, mostly empty islands round the edge: room for the roads of later courses
+    spare: [[-220, -560, -20, 150], [430, -470, 10, 130], [-860, -220, 0, 140], [-820, 430, -10, 150], [320, 560, 0, 140], [880, -220, 20, 120], [900, 330, -30, 130]]
+  };
+  var WP_COURSES = [{
+    name: 'コース1',                                   // a 3-lap circuit
+    path: function (line, arc) {
+      line(-480, 0, -200, 0, 20, 22);                  // away from the start plaza
+      arc(-200, -60, 60, 90, 0, 22, 23);               // over the stepping-stone islands...
+      arc(-80, -60, 60, 180, 270, 23, 24);
+      line(-80, -120, 0, -120, 24, 25);                // ...to the foot of the cake tower
+      arc(0, -220, 100, 90, -630, 25, 115, true);      // two turns up round the tower, 45 apart
+      line(0, -120, 300, -120, 115, 70);               // the long drop off the top
+      arc(300, 20, 140, -90, 90, 70, 68);              // the mochi-hook hairpin
+      line(300, 160, 70, 160, 68, 66, 7);              // the stretchy bridge
+      arc(70, 220, 60, -90, -180, 66, 65);             // the long way round the loop island...
+      line(10, 220, 10, 300, 65, 64);
+      arc(-45, 300, 55, 0, 180, 64, 63);
+      line(-100, 300, -100, 220, 63, 62);
+      arc(-160, 220, 60, 0, -90, 62, 61);              // ...back to where a good bridge launch lands you
+      line(-160, 160, -560, 160, 61, 20);              // down through the attraction area
+      arc(-560, 80, 80, 90, 270, 20, 20);              // round the strawberry-sauce tower
+      line(-560, 0, -480, 0, 20, 20);
+    },
+    rides: {
+      pad: [86.6, 32.5, -170], padVy: 50, padGuide: true,     // puni-puni pad on the first turn of the spiral: bounces you a turn higher
+      smallPads: [[-40, 24.5, -120, 0], [-470, 27, 160, -8], [-470, 27, 160, 8]],
+      hook: { cx: 300, cz: 20, r: 140, topY: 112, in: [300, 70, -120], out: [300, 68, 160] },
+      bridgeEnd: [70, 66, 160]
+    },
+    // stretches kept clear of scenery, ready for rides still to come
+    slots: [[-330, 21, 0], [-380, 32, 160]],
+    arches: [-230, -330, -420]
+  }];
   function parkPath() {
     var pts = [], D = Math.PI / 180, ss = function (u) { return u * u * (3 - 2 * u); };
     function line(x0, z0, x1, z1, y0, y1, sag) {
@@ -1816,26 +1860,12 @@ body {
         pts.push(new THREE.Vector3(x0 + (x1 - x0) * u, y0 + (y1 - y0) * ss(u) - (sag || 0) * Math.sin(Math.PI * u), z0 + (z1 - z0) * u));
       }
     }
-    function arc(cx, cz, r, a0, a1, y0, y1) {
+    function arc(cx, cz, r, a0, a1, y0, y1, lin) {   // lin: climb at a steady rate (a spiral keeps its turns evenly apart)
       a0 *= D; a1 *= D;
       var n = Math.max(3, Math.round(Math.abs(a1 - a0) * r / 14));
-      for (var i = 0; i < n; i++) { var u = i / n, a = a0 + (a1 - a0) * u; pts.push(new THREE.Vector3(cx + r * Math.cos(a), y0 + (y1 - y0) * ss(u), cz + r * Math.sin(a))); }
+      for (var i = 0; i < n; i++) { var u = i / n, a = a0 + (a1 - a0) * u; pts.push(new THREE.Vector3(cx + r * Math.cos(a), y0 + (y1 - y0) * (lin ? u : ss(u)), cz + r * Math.sin(a))); }
     }
-    line(0, 0, 420, 0, 20, 12);                  // out of the plaza, down under the high road
-    arc(420, -80, 80, 90, -90, 12, 30);           // climbing round the three-tier mochi tower
-    line(420, -160, 250, -160, 30, 36);
-    arc(250, -80, 80, -90, -270, 36, 55);         // round the dango tower and up on to the high road
-    line(250, 0, 560, 0, 55, 55);                 // the high road, straight over the start straight
-    arc(560, 95, 95, -90, 90, 55, 52);            // the mochi-hook hairpin
-    line(560, 190, 330, 190, 52, 50, 7);          // the stretchy bridge across the gap
-    arc(330, 250, 60, -90, -180, 50, 49);         // the long way round the island...
-    line(270, 250, 270, 330, 49, 48);
-    arc(215, 330, 55, 0, 180, 48, 47);
-    line(160, 330, 160, 250, 47, 46);
-    arc(100, 250, 60, 0, -90, 46, 45);            // ...back to where a good bridge launch lands you
-    line(100, 190, -120, 190, 45, 20);            // the big drop under the candy arches
-    arc(-120, 95, 95, 90, 270, 20, 20);           // round the strawberry-sauce tower
-    line(-120, 0, 0, 0, 20, 20);
+    WP_COURSES[0].path(line, arc);
     return pts;
   }
   function idxAt(x, y, z) {
@@ -1846,14 +1876,16 @@ body {
   function inZone(i, a, b) { return ((i - a) % N + N) % N <= ((b - a) % N + N) % N; }
   function roadDir(i) { var t = T[((i % N) + N) % N]; return Math.atan2(t.x, t.z); }
   function parkLayout() {
-    var h0 = idxAt(560, 55, 0), h1 = idxAt(560, 52, 190);
-    park = { pad: idxAt(90, 19, 0), b0: h1 + 2, b1: idxAt(330, 50, 190) - 2, dip: new Float32Array(N), wave: 0, waveV: 0, pads: [], hinted: -1,
-             hook: { i0: h0, i1: h1, cx: 560, cz: 95, r: 95, top: new THREE.Vector3(560, 97, 95), aExit: Math.atan2(P[h1].z - 95, P[h1].x - 560) } };
+    var C = WP_COURSES[0], R = C.rides, hk = R.hook;
+    var h0 = idxAt(hk.in[0], hk.in[1], hk.in[2]), h1 = idxAt(hk.out[0], hk.out[1], hk.out[2]);
+    park = { course: C, pad: idxAt(R.pad[0], R.pad[1], R.pad[2]), b0: h1 + 2, b1: idxAt(R.bridgeEnd[0], R.bridgeEnd[1], R.bridgeEnd[2]) - 2,
+             dip: new Float32Array(N), wave: 0, waveV: 0, pads: [], hinted: -1,
+             hook: { i0: h0, i1: h1, cx: hk.cx, cz: hk.cz, r: hk.r, top: new THREE.Vector3(hk.cx, hk.topY, hk.cz), aExit: Math.atan2(P[h1].z - hk.cz, P[h1].x - hk.cx) } };
     park.bm = (park.b0 + park.b1) >> 1;
     park.skip = function (i) { return i >= park.b0 && i < park.b1; };
-    var clear = function (f) { var i = Math.floor(f * N); return !inZone(i, park.b0 - 4, park.b1 + 4) && !inZone(i, park.pad - 12, park.pad + 12); };
-    park.coinF = [0.04, 0.14, 0.24, 0.36, 0.45, 0.66, 0.78, 0.9].filter(clear);
-    park.boxF = [0.1, 0.3, 0.43, 0.7, 0.86].filter(clear);
+    var clear = function (f) { var i = Math.floor(f * N); return !inZone(i, park.b0 - 4, park.b1 + 4) && !inZone(i, park.pad - 30, park.pad + 12) && !inZone(i, h0 - 4, h1 + 4); };
+    park.coinF = [0.03, 0.12, 0.2, 0.3, 0.45, 0.52, 0.66, 0.78, 0.9].filter(clear);
+    park.boxF = [0.08, 0.24, 0.42, 0.72, 0.86].filter(clear);
   }
   function dipAt(i) { return park && i >= park.b0 && i <= park.b1 ? park.dip[i] : 0; }
   function parkGround(x, z, alt) {              // the highest road surface under (x, z) that is not above the kart
@@ -1876,7 +1908,7 @@ body {
     }
     return { i: bi, d: Math.sqrt(bd) };
   }
-  function launch(k, vy) { k.air = 1; k.vy = vy; k.airT = 0; k.trick = false; k.bounce = true; k.launchH = k.alt; k.drift = 0; k.charge = 0; }
+  function launch(k, vy) { k.guide = false; k.air = 1; k.vy = vy; k.airT = 0; k.trick = false; k.bounce = true; k.launchH = k.alt; k.drift = 0; k.charge = 0; }
   // B. mochi hook: hold the drift button at the hairpin and the kart swings round the tower on a stretchy strand
   var ropeG = new THREE.CylinderGeometry(0.5, 0.9, 1, 8); ropeG.translate(0, 0.5, 0); ropeG.rotateX(Math.PI / 2);
   var ropeM = new THREE.MeshPhongMaterial({ color: 0xfff1f6, shininess: 40, specular: 0x333333 });
@@ -1930,7 +1962,7 @@ body {
     if (k.human) { sfx('byoon'); if (k.isPlayer && !twoP) flash('ビヨーン！', 1); }
   }
   function fallOut(k) {                         // dropped off the park: back on to the road
-    unhook(k, false); k.bounce = false;
+    unhook(k, false); k.bounce = false; k.guide = false;
     if (k.human) { respawn(k); return; }
     var i = k.idx;
     k.x = P[i].x; k.z = P[i].z; k.h = roadDir(i); k.lat = 0; k.air = 0; k.vy = 0; k.gy = k.alt = H[i]; k.speed = 30; k.trick = false;
@@ -1941,7 +1973,7 @@ body {
       park.pads.forEach(function (p) {
         if (!inZone(k.idx, p.i - 3, p.i + 3) || Math.abs(k.lat - p.lat) > p.w) return;
         var power = p.big && (k.boostT > 0 || k.mushT > 0 || k.starT > 0) && (k.human || k.slot % 4 === 0);
-        launch(k, power ? 40 : p.big ? 18 : 13); p.sq = 1;
+        launch(k, power ? p.vyPow || 40 : p.big ? 18 : 13); p.sq = 1; k.guide = !!p.guide;
         if (k.human) { sfx('boing'); if (power && k.isPlayer && !twoP) flash('ぷにぷにスーパージャンプ！', 1.2); }
       });
     });
@@ -1953,7 +1985,7 @@ body {
       park.dip[i] = Math.max(-6, d);
     }
     if (!twoP && state === 'race' && player.total < N) {   // first lap: say what each ride does just before it
-      [[park.pad - 75, 'ダッシュ中にピンクのぷにぷにパッドへ → 上の道まで大ジャンプ！'],
+      [[park.pad - 75, 'ダッシュ中にピンクのぷにぷにパッドへ → 1つ上の段まで大ジャンプ！'],
        [park.hook.i0 - 60, 'ドリフトボタン押しっぱなしで もちフック！ 出口で離すとダッシュ'],
        [park.bm - 45, 'ビヨーン橋のまん中で ドリフトボタン → 向こう岸へ大ジャンプ']].forEach(function (h, n) {
         if (park.hinted !== n && inZone(player.idx, h[0], h[0] + 4)) { park.hinted = n; flash(h[1], 2.8); }
@@ -1961,46 +1993,241 @@ body {
     }
   }
 
-  function parkProps() {
-    var mochi = function (c) { return new THREE.MeshPhongMaterial({ color: c, shininess: 26, specular: 0x2c2c2c }); };
-    var gummy = function (c) { return new THREE.MeshPhongMaterial({ color: c, shininess: 90, specular: 0x888888, transparent: true, opacity: 0.8 }); };
-    var candy = function (c) { return new THREE.MeshPhongMaterial({ color: c, shininess: 120, specular: 0xaaaaaa }); };
-    var cream = function (c) { return lam(c); };
-    var kinako = flat(0xffc6dd), kinakoDark = flat(0xcdbcf7);
-    var sugar = new THREE.MeshPhongMaterial({ color: 0xe8f8ff, shininess: 150, specular: 0xffffff, transparent: true, opacity: 0.42, depthWrite: false });
-    var SPH = new THREE.SphereGeometry(1, 28, 18), SPHL = new THREE.SphereGeometry(1, 12, 9), DOD = new THREE.DodecahedronGeometry(1);
-    var PASTEL = [0xff9ec4, 0xa8e6cf, 0xfff07a, 0xc9b6ff, 0x9fdcff, 0xffc29e];
-    var islands = [];
-    function mesh(geo, mat, x, y, z, sx, sy, sz, parent) {
-      var m = new THREE.Mesh(geo, mat); m.position.set(x, y, z);
-      m.scale.set(sx || 1, sy === undefined ? sx || 1 : sy, sz === undefined ? sx || 1 : sz);
-      m.castShadow = true; m.receiveShadow = true; (parent || world).add(m); return m;
-    }
-    function geoOf(pos, uv, idx) {
-      var g = new THREE.BufferGeometry();
-      g.setAttribute('position', pos instanceof Float32Array ? new THREE.BufferAttribute(pos, 3) : new THREE.Float32BufferAttribute(pos, 3));
-      g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx); g.computeVertexNormals(); return g;
-    }
-    function roadClear(x, z, y0, y1, pad) {   // nothing decorative may sit on or poke into a road
-      for (var i = 0; i < N; i += 3) if (H[i] > y0 && H[i] < y1 && Math.hypot(P[i].x - x, P[i].z - z) < HW + pad) return false;
-      return true;
-    }
-    var stripeTex = function (a, b, rep) {
-      var t = canvasTex(64, 16, function (g) {
-        g.fillStyle = a; g.fillRect(0, 0, 64, 16); g.fillStyle = b;
-        for (var x = -16; x < 80; x += 16) { g.beginPath(); g.moveTo(x, 16); g.lineTo(x + 8, 16); g.lineTo(x + 16, 0); g.lineTo(x + 8, 0); g.fill(); }
-      });
-      t.repeat.set(rep, 1); return t;
-    };
-
-    // ---- the road as a thick slab of cake with candy rails, standing on candy-coloured pillars ----
-    var layerTex = canvasTex(64, 64, function (g) {
+  // ---- Wonder Park parts: each one builds a landmark at a map position, so any course can reuse it ----
+  // Repeated shapes are collected with K.put() and drawn in one go per shape by K.flush() (one draw call each).
+  function wpKit() {
+    var K = { PASTEL: [0xff9ec4, 0xa8e6cf, 0xfff07a, 0xc9b6ff, 0x9fdcff, 0xffc29e], batches: {} };
+    K.mochi = function (c) { return new THREE.MeshPhongMaterial({ color: c, shininess: 26, specular: 0x2c2c2c }); };
+    K.gummy = function (c) { return new THREE.MeshPhongMaterial({ color: c, shininess: 90, specular: 0x888888, transparent: true, opacity: 0.8 }); };
+    K.candy = function (c) { return new THREE.MeshPhongMaterial({ color: c, shininess: 120, specular: 0xaaaaaa }); };
+    K.cream = function (c) { return lam(c); };
+    K.SPH = new THREE.SphereGeometry(1, 28, 18); K.SPHL = new THREE.SphereGeometry(1, 12, 9);
+    K.layerTex = canvasTex(64, 64, function (g) {
       g.fillStyle = '#ffe9a8'; g.fillRect(0, 0, 64, 64);                    // sponge
       for (var n = 0; n < 70; n++) { g.fillStyle = 'rgba(255,190,90,0.3)'; g.fillRect(Math.random() * 64, 24 + Math.random() * 40, 2, 2); }
       g.fillStyle = '#f48fb8'; g.fillRect(0, 13, 64, 9);                    // strawberry jam
       g.fillStyle = '#fff4e6'; g.fillRect(0, 0, 64, 13);                    // cream, dripping
       for (var x = 0; x < 64; x += 8) { g.beginPath(); g.ellipse(x + 4, 12, 3.4, 4 + (x * 7 % 9), 0, 0, 6.3); g.fill(); }
     });
+    K.stripeTex = function (a, b, rep) {
+      var t = canvasTex(64, 16, function (g) {
+        g.fillStyle = a; g.fillRect(0, 0, 64, 16); g.fillStyle = b;
+        for (var x = -16; x < 80; x += 16) { g.beginPath(); g.moveTo(x, 16); g.lineTo(x + 8, 16); g.lineTo(x + 16, 0); g.lineTo(x + 8, 0); g.fill(); }
+      });
+      t.repeat.set(rep, 1); return t;
+    };
+    K.mesh = function (geo, mat, x, y, z, sx, sy, sz, parent) {
+      var m = new THREE.Mesh(geo, mat); m.position.set(x, y, z);
+      m.scale.set(sx || 1, sy === undefined ? sx || 1 : sy, sz === undefined ? sx || 1 : sz);
+      m.castShadow = true; m.receiveShadow = true; (parent || world).add(m); return m;
+    };
+    K.put = function (name, it) { it.sky = true; (K.batches[name] = K.batches[name] || []).push(it); };
+    var sideTex = K.layerTex.clone(); sideTex.needsUpdate = true; sideTex.repeat.set(14, 1);
+    var fallTex = canvasTex(32, 64, function (g) {
+      g.fillStyle = '#ffffff'; g.fillRect(0, 0, 32, 64);
+      for (var n = 0; n < 14; n++) { g.fillStyle = 'rgba(255,255,255,0.0)'; g.fillStyle = n % 2 ? 'rgba(200,225,255,0.55)' : 'rgba(255,255,255,0.9)'; g.fillRect(Math.random() * 30, Math.random() * 64, 2 + Math.random() * 3, 10 + Math.random() * 18); }
+    });
+    fallTex.repeat.set(1, 3);
+    tickers.push(function (dt) { fallTex.offset.y += dt * 0.9; });
+    var shape = function (g, f) { f(g); return g; };
+    K.defs = {                                       // name: [geometry, material]
+      isleTop: function () { return [shape(new THREE.CylinderGeometry(1, 1, 1, 40), function (g) { g.translate(0, -0.5, 0); }), lam(0xffffff)]; },
+      isleRim: function () { return [shape(new THREE.TorusGeometry(1, 0.03, 6, 48), function (g) { g.rotateX(Math.PI / 2); }), lam(0xfffaf3)]; },
+      isleSide: function () { return [shape(new THREE.CylinderGeometry(1, 1, 1, 40, 1, true), function (g) { g.translate(0, -0.5, 0); }), new THREE.MeshLambertMaterial({ map: sideTex })]; },
+      isleUnder: function () { return [shape(new THREE.ConeGeometry(1, 1, 16, 1), function (g) { g.rotateX(Math.PI); g.translate(0, -0.5, 0); }), flat(0xffffff)]; },
+      fall: function () { return [shape(new THREE.PlaneGeometry(1, 1), function (g) { g.translate(0, -0.5, 0); }), new THREE.MeshBasicMaterial({ map: fallTex, transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false })]; },
+      splash: function () { return [K.SPHL, lam(0xffffff)]; },
+      drip: function () { return [K.SPHL, lam(0xffffff)]; },
+      berry: function () { return [shape(new THREE.ConeGeometry(1, 1.6, 10), function (g) { g.rotateX(Math.PI); }), K.candy(0xffffff)]; },
+      houseB: function () { return [shape(new THREE.CylinderGeometry(1, 1, 1, 16), function (g) { g.translate(0, 0.5, 0); }), lam(0xffffff)]; },
+      houseR: function () { return [shape(new THREE.ConeGeometry(1, 1, 16), function (g) { g.translate(0, 0.5, 0); }), K.candy(0xffffff)]; },
+      ball: function () { return [K.SPHL, K.candy(0xffffff)]; },
+      mochiBall: function () { return [K.SPH, K.mochi(0xffffff)]; },
+      pole: function () { return [shape(new THREE.CylinderGeometry(0.35, 0.35, 1, 6), function (g) { g.translate(0, 0.5, 0); }), lam(0xffffff)]; },
+      flag: function () { return [shape(new THREE.BufferGeometry(), function (g) { g.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 0, -1, 0, 1.6, -0.5, 0], 3)); g.computeVertexNormals(); }), new THREE.MeshLambertMaterial({ color: 0xffffff, side: THREE.DoubleSide })]; },
+      star: function () {
+        var s = new THREE.Shape();
+        for (var i = 0; i < 10; i++) { var a = i / 10 * Math.PI * 2 - Math.PI / 2, r = i % 2 ? 0.45 : 1; s[i ? 'lineTo' : 'moveTo'](Math.cos(a) * r, -Math.sin(a) * r); }
+        return [new THREE.ExtrudeGeometry(s, { depth: 0.35, bevelEnabled: false }), K.candy(0xffffff)];
+      },
+      block: function () { return [new THREE.BoxGeometry(1, 1, 1), K.gummy(0xffffff)]; },
+      strut: function () { return [new THREE.BoxGeometry(1, 1, 1), K.candy(0xffffff)]; },
+      cone: function () { return [shape(new THREE.ConeGeometry(1, 1, 12), function (g) { g.translate(0, 0.5, 0); }), K.candy(0xffffff)]; },
+      puff: function () { return [K.SPHL, lam(0xffffff)]; }
+    };
+    K.flush = function () {
+      Object.keys(K.batches).forEach(function (n) { if (K.batches[n].length) { var d = K.defs[n](); instanced(d[0], d[1], K.batches[n]); } });
+      K.batches = {};
+    };
+    return K;
+  }
+  function wpFall(K, x, z, yTop, ang, w, col) {    // a ribbon of syrup pouring off an island's edge into the clouds
+    var len = yTop + 115;
+    K.put('fall', { x: x, y: yTop, z: z, ry: -ang - Math.PI / 2, sv: [w, len, 1], c: col });
+    K.put('splash', { x: x, y: -112, z: z, sv: [w * 0.9, 5, w * 0.9], c: 0xffffff });
+  }
+  function wpIsland(K, o) {                        // a floating island: grass or cream on top, layered cake round the side, a point below
+    var r = o.r, y = o.y, d = o.depth || Math.max(5, r * 0.11);
+    K.put('isleTop', { x: o.x, y: y, z: o.z, sv: [r, 2.4, r], c: o.top || 0xc8ecb4 });
+    K.put('isleRim', { x: o.x, y: y - 0.3, z: o.z, s: r * 1.005 });
+    K.put('isleSide', { x: o.x, y: y - 2.4, z: o.z, sv: [r * 0.99, d, r * 0.99] });
+    K.put('isleUnder', { x: o.x, y: y - 2.4 - d, z: o.z, sv: [r * 0.97, r * (o.taper || 1.05), r * 0.97], c: o.under || 0xffc6dd });
+    (o.falls || []).forEach(function (a, n) {
+      wpFall(K, o.x + Math.cos(a) * (r + 0.8), o.z + Math.sin(a) * (r + 0.8), y - 0.5, a, Math.max(8, r * 0.13), n % 2 ? 0x9fdcff : 0xff9ec4);
+    });
+  }
+  function wpCakeTower(K, o) {                     // tiers of cake stacked high; a road may wind round it
+    var g = new THREE.Group(); g.position.set(o.x, 0, o.z); world.add(g);
+    var tiers = [[78, -20, 42, 0xffb3cd], [72, 42, 86, 0xfff4e0], [64, 86, 128, 0xbdeccb], [52, 128, 168, 0xd7c8ff], [40, 168, 202, 0xfff1a6], [28, 202, 228, 0xffb3cd]];
+    tiers.forEach(function (t, n) {
+      var body = K.mesh(new THREE.CylinderGeometry(t[0], t[0] * 1.02, t[2] - t[1], 48), K.mochi(t[3]), 0, (t[1] + t[2]) / 2, 0, 1, 1, 1, g);
+      body.castShadow = false;
+      K.mesh(new THREE.TorusGeometry(t[0] + 0.6, 2.4, 8, 48), lam(0xfffaf3), 0, t[2], 0, 1, 1, 1, g).rotation.x = Math.PI / 2;
+      var cnt = Math.round(t[0] / 3.2);
+      for (var i = 0; i < cnt; i++) {               // cream dripping over each tier's edge, berries round the top
+        var a = i / cnt * Math.PI * 2 + n;
+        K.put('drip', { x: o.x + Math.cos(a) * t[0], y: t[2] - 2.5, z: o.z + Math.sin(a) * t[0], sv: [2.4, 3 + (i * 7 % 5), 2.4], c: 0xfffaf3 });
+        if (i % 3 === 0 && n < 5) K.put('berry', { x: o.x + Math.cos(a) * (t[0] - 6), y: t[2] + 2.2, z: o.z + Math.sin(a) * (t[0] - 6), s: 2.2, c: 0xff3a5c });
+      }
+    });
+    K.mesh(new THREE.ConeGeometry(20, 24, 24), lam(0xfffaf3), 0, 240, 0, 1, 1, 1, g);       // a swirl of cream with a strawberry on top
+    var berry = K.mesh(new THREE.ConeGeometry(11, 20, 20), K.candy(0xff3355), 0, 262, 0, 1, 1, 1, g); berry.rotation.x = Math.PI;
+    K.mesh(K.SPH, K.candy(0xff3355), 0, 271, 0, 11, 5, 11, g);
+    for (var l = 0; l < 5; l++) { var lf = K.mesh(new THREE.ConeGeometry(3.4, 9, 6), K.candy(0x48b04a), Math.cos(l * 1.26) * 5, 277, Math.sin(l * 1.26) * 5, 1, 1, 1, g); lf.rotation.z = Math.cos(l * 1.26) * 0.9; lf.rotation.x = Math.sin(l * 1.26) * 0.9; }
+    return g;
+  }
+  function wpPlaza(K, o, face) {                   // the start plaza: a big round island, a mochi-face dome, flags and stars
+    wpIsland(K, { x: o.x, z: o.z, y: o.y, r: o.r, top: 0xffe3ef, under: 0xffc6dd, falls: [2.2, 2.6, 4.1] });
+    var tex = canvasTex(256, 256, function (g) {
+      var cs = ['#fff5f9', '#ffd6e7', '#e3fbef', '#fff6cf', '#efe6ff'];
+      for (var r = 8; r > 0; r--) { g.fillStyle = cs[r % 5]; g.beginPath(); g.arc(128, 128, r * 16, 0, 6.3); g.fill(); }
+      g.strokeStyle = 'rgba(255,255,255,0.85)'; g.lineWidth = 2;
+      for (var a = 0; a < 24; a++) { g.beginPath(); g.moveTo(128, 128); g.lineTo(128 + Math.cos(a / 24 * 6.283) * 128, 128 + Math.sin(a / 24 * 6.283) * 128); g.stroke(); }
+    });
+    var disc = new THREE.Mesh(new THREE.CircleGeometry(o.r * 0.93, 64), new THREE.MeshLambertMaterial({ map: tex }));
+    disc.rotation.x = -Math.PI / 2; disc.position.set(o.x, o.y + 0.06, o.z); disc.receiveShadow = true; world.add(disc);
+    var d = new THREE.Group(); d.position.set(face[0], o.y, face[1]); d.rotation.y = face[2]; world.add(d);   // big white mochi with a face, looking at the road
+    K.mesh(K.SPH, K.mochi(0xfffaf7), 0, 2, 0, 26, 21, 24, d);
+    K.mesh(new THREE.CylinderGeometry(27, 28, 3, 40), K.candy(0xff9ec4), 0, 1.4, 0, 1, 1, 1, d);
+    var ink = lam(0x3a2a3a), blush = lam(0xff9fbf);
+    K.mesh(K.SPHL, ink, -7, 12, 20.2, 1.6, 2.3, 0.8, d); K.mesh(K.SPHL, ink, 7, 12, 20.2, 1.6, 2.3, 0.8, d);
+    K.mesh(K.SPHL, blush, -12.5, 8, 18.6, 3.2, 1.7, 0.8, d); K.mesh(K.SPHL, blush, 12.5, 8, 18.6, 3.2, 1.7, 0.8, d);
+    var mouth = K.mesh(new THREE.TorusGeometry(2.2, 0.45, 6, 16, Math.PI), ink, 0, 8.6, 21.4, 1, 1, 1, d); mouth.rotation.z = Math.PI;
+    var cols = [0xff6fa5, 0x3fc9a0, 0xffc23d, 0x7d6bff, 0x4fb3f3];
+    for (var i = 0; i < 16; i++) {                   // flags and stars round the rim, kept off the road
+      var a = i / 16 * Math.PI * 2 + 0.2, x = o.x + Math.cos(a) * (o.r - 8), z = o.z + Math.sin(a) * (o.r - 8);
+      if (!wpClear(x, z, o.y - 2, o.y + 20, 6)) continue;
+      K.put('pole', { x: x, y: o.y, z: z, sv: [1, 22, 1], c: 0xffffff });
+      if (i % 2) K.put('flag', { x: x, y: o.y + 21.5, z: z, ry: a + Math.PI / 2, s: 5, c: cols[i % 5] });
+      else K.put('star', { x: x, y: o.y + 24.5, z: z, ry: a + Math.PI / 2, s: 3.4, c: 0xffd84a });
+    }
+    for (i = 0; i < 10; i++) {                       // little sweet shops on the plaza
+      a = i / 10 * Math.PI * 2 + 0.5; x = o.x + Math.cos(a) * (o.r - 26); z = o.z + Math.sin(a) * (o.r - 26);
+      if (!wpClear(x, z, o.y - 2, o.y + 20, 10) || Math.hypot(x - face[0], z - face[1]) < 36) continue;
+      wpHouse(K, x, o.y, z, 5.5, 8, cols[i % 5]);
+    }
+  }
+  function wpHouse(K, x, y, z, r, h, roof) {       // a round sweet-shop with a pointed candy roof
+    K.put('houseB', { x: x, y: y, z: z, sv: [r, h, r], c: 0xfff8ef });
+    K.put('houseR', { x: x, y: y + h, z: z, sv: [r * 1.3, r * 1.5, r * 1.3], c: roof });
+    K.put('ball', { x: x, y: y + h + r * 1.5 + 0.8, z: z, s: 1.1, c: 0xffffff });
+  }
+  function wpWheel(K, o) {                         // Ferris-wheel island: the wheel, shops and flags
+    wpIsland(K, { x: o.x, z: o.z, y: o.y, r: o.r, top: 0xfff4dc, under: 0xd7c8ff, falls: [0.4, 1.1, 5.6] });
+    var fw = new THREE.Group(), R = 72; fw.position.set(o.x + 18, o.y + R + 18, o.z); fw.rotation.y = Math.PI / 2; world.add(fw);
+    var wheel = new THREE.Group(); fw.add(wheel);
+    K.mesh(new THREE.TorusGeometry(R, 2.8, 10, 80), lam(0xfffaf3), 0, 0, 0, 1, 1, 1, wheel);
+    K.mesh(new THREE.TorusGeometry(R - 9, 1.2, 8, 80), K.candy(0xff9ec4), 0, 0, 0, 1, 1, 1, wheel);
+    K.mesh(K.SPH, K.candy(0xff8fc0), 0, 0, 0, 10, 10, 7, fw);
+    var cabins = [];
+    for (var i = 0; i < 10; i++) {
+      var ca = i / 10 * Math.PI * 2;
+      var sp = K.mesh(new THREE.CylinderGeometry(0.8, 0.8, R, 6), lam(0xfff2f7), Math.cos(ca) * R / 2, Math.sin(ca) * R / 2, 0, 1, 1, 1, wheel); sp.rotation.z = ca - Math.PI / 2;
+      var cab = new THREE.Group(); cab.position.set(Math.cos(ca) * R, Math.sin(ca) * R, 0); wheel.add(cab);
+      K.mesh(new THREE.CylinderGeometry(5.4, 4.6, 7, 14), K.gummy(K.PASTEL[i % 6]), 0, -6, 0, 1, 1, 1, cab);
+      K.mesh(K.SPHL, K.gummy(K.PASTEL[(i + 2) % 6]), 0, -2, 0, 5.4, 2.6, 5.4, cab);
+      cabins.push(cab);
+    }
+    [-1, 1].forEach(function (s) { [-1, 1].forEach(function (z) {
+      var leg = K.mesh(new THREE.CylinderGeometry(1.8, 2.4, R + 24, 10), K.candy(0xc9b6ff), s * 22, -(R + 18) / 2, z * 12, 1, 1, 1, fw); leg.rotation.z = s * 0.26; leg.rotation.x = -z * 0.1;
+    }); });
+    tickers.push(function (dt) { wheel.rotation.z += dt * 0.08; cabins.forEach(function (c) { c.rotation.z = -wheel.rotation.z; }); });
+    var cols = [0xff6fa5, 0x3fc9a0, 0xffc23d, 0x7d6bff, 0x4fb3f3];
+    for (i = 0; i < 9; i++) {
+      var a = i / 9 * Math.PI * 2, rr = o.r * (i % 2 ? 0.72 : 0.5), x = o.x + Math.cos(a) * rr, z = o.z + Math.sin(a) * rr;
+      if (Math.abs(x - o.x - 18) < 30 && Math.abs(z - o.z) < 28) continue;
+      wpHouse(K, x, o.y, z, 5 + (i % 3), 7 + (i % 4) * 2, cols[i % 5]);
+    }
+  }
+  function wpArch(K, x, y, z, ry, w, col) {        // a striped candy arch over the road, on gummy blocks
+    var arch = K.mesh(new THREE.TorusGeometry(w, 2.8, 12, 48, Math.PI), new THREE.MeshPhongMaterial({ map: K.stripeTex('#ffffff', col, 10), shininess: 110 }), x, y, z);
+    arch.rotation.y = ry; arch.castShadow = false;
+    [-1, 1].forEach(function (s, n) { K.put('block', { x: x + Math.cos(ry) * s * w, y: y + 1.6, z: z - Math.sin(ry) * s * w, s: 7, ry: ry + 0.3, c: K.PASTEL[(n * 3 + Math.abs(Math.round(x))) % 6] }); });
+  }
+  function wpSauceTower(K, o) {                    // a cream tower with strawberry sauce pouring down and a mochi slide wrapped round it
+    wpIsland(K, { x: o.x, z: o.z, y: o.y, r: o.r, top: 0xc8ecb4, under: 0xffc6dd, falls: [3.5] });
+    var sg = new THREE.Group(); sg.position.set(o.x, o.y, o.z); world.add(sg);
+    K.mesh(new THREE.CylinderGeometry(20, 23, 150, 32), lam(0xfff8ee), 0, 75, 0, 1, 1, 1, sg);
+    K.mesh(K.SPH, K.candy(0xe8253f), 0, 152, 0, 25, 13, 25, sg);
+    for (var i = 0; i < 9; i++) { var da = i / 9 * 6.283; K.put('drip', { x: o.x + Math.cos(da) * 19.5, y: o.y + 142 - (i % 3) * 12, z: o.z + Math.sin(da) * 19.5, sv: [3, 11 + (i % 3) * 6, 3], c: 0xe8253f }); }
+    var slide = [];
+    for (i = 0; i <= 90; i++) { var u = i / 90; slide.push(new THREE.Vector3(Math.cos(u * 15) * 33, 140 - u * 132, Math.sin(u * 15) * 33)); }
+    K.mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(slide), 260, 4, 12), K.gummy(0xff8fc0), 0, 0, 0, 1, 1, 1, sg).castShadow = false;
+  }
+  function wpHookTower(K, o, topY) {               // the tower the mochi hook grabs: a glowing ring on top
+    wpIsland(K, { x: o.x, z: o.z, y: o.y, r: o.r, top: 0xc8f2e0, under: 0x9fdcff, falls: [1.6, 4.7] });
+    var hg = new THREE.Group(); hg.position.set(o.x, 0, o.z); world.add(hg);
+    K.mesh(new THREE.CylinderGeometry(11, 15, topY - o.y - 10, 32), K.mochi(0xfff3f7), 0, (topY + o.y - 10) / 2, 0, 1, 1, 1, hg);
+    K.mesh(K.SPH, K.mochi(0xffb3cd), 0, topY - 10, 0, 16, 8, 16, hg);
+    var ring = K.mesh(new THREE.TorusGeometry(8, 2.2, 12, 40), new THREE.MeshBasicMaterial({ color: 0xff4f9a }), 0, topY, 0, 1, 1, 1, hg);
+    var ring2 = K.mesh(new THREE.TorusGeometry(11, 0.8, 8, 40), new THREE.MeshBasicMaterial({ color: 0xffffff }), 0, topY, 0, 1, 1, 1, hg);
+    var t = 0;
+    tickers.push(function (dt) { t += dt; ring.rotation.y += dt * 1.6; ring2.rotation.y -= dt; var s = 1 + 0.12 * Math.sin(t * 5); ring.scale.set(s, s, s); });
+    var cols = [0xff6fa5, 0xffc23d, 0x7d6bff, 0x4fb3f3];
+    for (var i = 0; i < 8; i++) { var a = i / 8 * Math.PI * 2 + 0.3; wpHouse(K, o.x + Math.cos(a) * o.r * 0.62, o.y, o.z + Math.sin(a) * o.r * 0.62, 5, 7 + (i % 3) * 3, cols[i % 4]); }
+  }
+  function wpSky(K, cx, cz) {                      // cloud sea below, cloud banks and far-off islands with rides of their own
+    var cloudTex = canvasTex(256, 256, function (g) {
+      g.fillStyle = '#f4faff'; g.fillRect(0, 0, 256, 256);
+      for (var n = 0; n < 90; n++) {
+        var x = Math.random() * 256, y = Math.random() * 256, r = 12 + Math.random() * 40, gr = g.createRadialGradient(x, y, 0, x, y, r);
+        gr.addColorStop(0, ['rgba(255,255,255,1)', 'rgba(214,236,255,0.7)', 'rgba(255,255,255,0.9)'][n % 3]); gr.addColorStop(1, 'rgba(255,255,255,0)');
+        g.fillStyle = gr; [-256, 0, 256].forEach(function (ox) { [-256, 0, 256].forEach(function (oy) { g.save(); g.translate(ox, oy); g.fillRect(x - r, y - r, r * 2, r * 2); g.restore(); }); });
+      }
+    });
+    cloudTex.repeat.set(10, 10);
+    var sea = new THREE.Mesh(new THREE.PlaneGeometry(7000, 7000), new THREE.MeshLambertMaterial({ map: cloudTex }));
+    sea.rotation.x = -Math.PI / 2; sea.position.set(cx, -120, cz); world.add(sea);
+    tickers.push(function (dt) { cloudTex.offset.x += dt * 0.004; });
+    var i, m;
+    for (i = 0; i < 130; i++) {
+      var pa = rnd(0, 6.283), pr = rnd(250, 2600), px = cx + Math.cos(pa) * pr, pz = cz + Math.sin(pa) * pr, py = pr > 1500 ? rnd(-90, -10) : rnd(-112, -70);
+      for (m = 0; m < 4; m++) K.put('puff', { x: px + rnd(-60, 60), y: py + rnd(0, 22), z: pz + rnd(-60, 60), sv: [rnd(34, 80), rnd(16, 32), rnd(34, 80)], c: [0xffffff, 0xf2f8ff, 0xffffff][m % 3] });
+    }
+    for (i = 0; i < 18; i++) {                      // far islands: each with a little landmark of its own
+      var fa = i / 18 * Math.PI * 2 + rnd(-0.1, 0.1), fr = rnd(1300, 1900), fx = cx + Math.cos(fa) * fr, fz = cz + Math.sin(fa) * fr, fy = rnd(-30, 160), r = rnd(70, 140);
+      wpIsland(K, { x: fx, z: fz, y: fy, r: r, top: [0xc8ecb4, 0xffe3ef, 0xfff4dc, 0xc8f2e0][i % 4], under: [0xffc6dd, 0xd7c8ff, 0x9fdcff][i % 3], falls: i % 2 ? [fa + Math.PI] : [], taper: 1.2 });
+      var kind = i % 4, fc = K.PASTEL[(i + 3) % 6];
+      if (kind === 0) { K.put('mochiBall', { x: fx, y: fy + r * 0.25, z: fz, sv: [r * 0.55, r * 0.35, r * 0.55], c: 0xfff4f7 }); K.put('mochiBall', { x: fx, y: fy + r * 0.75, z: fz, sv: [r * 0.4, r * 0.27, r * 0.4], c: fc }); }
+      else if (kind === 1) { K.put('pole', { x: fx, y: fy, z: fz, sv: [6, r * 2.2, 6], c: 0xe5c28c }); [0.55, 1.15, 1.75].forEach(function (h, n) { K.put('mochiBall', { x: fx, y: fy + r * h, z: fz, s: r * 0.28, c: K.PASTEL[(i + n) % 6] }); }); }
+      else if (kind === 2) { K.put('houseB', { x: fx, y: fy, z: fz, sv: [r * 0.3, r * 0.7, r * 0.3], c: 0xfff8ef }); K.put('houseR', { x: fx, y: fy + r * 0.7, z: fz, sv: [r * 0.42, r * 0.6, r * 0.42], c: fc }); }
+      else { K.put('cone', { x: fx, y: fy, z: fz, sv: [r * 0.35, r * 1.1, r * 0.35], c: fc }); K.put('ball', { x: fx, y: fy + r * 1.15, z: fz, s: r * 0.1, c: 0xffffff }); }
+    }
+  }
+  function wpClear(x, z, y0, y1, pad) {            // nothing decorative may sit on or poke into a road
+    for (var i = 0; i < N; i += 3) if (H[i] > y0 && H[i] < y1 && Math.hypot(P[i].x - x, P[i].z - z) < HW + pad) return false;
+    return true;
+  }
+
+  function parkProps() {
+    var K = wpKit(), C = park.course, M = WP_MAP, mesh = K.mesh, candy = K.candy, mochi = K.mochi, SPH = K.SPH, SPHL = K.SPHL, PASTEL = K.PASTEL;
+    function geoOf(pos, uv, idx) {
+      var g = new THREE.BufferGeometry();
+      g.setAttribute('position', pos instanceof Float32Array ? new THREE.BufferAttribute(pos, 3) : new THREE.Float32BufferAttribute(pos, 3));
+      g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx); g.computeVertexNormals(); return g;
+    }
+
+    // ---- this course's road: a thick slab of cake with candy rails, on pillars, or held to the tower by struts ----
     var E = HW + 1.6, DEP = 5, sp = [], su = [], si = [], rp = [], ru = [], ri = [], acc = 0, i;
     for (i = 0; i <= N; i++) {
       var j = i % N, h = H[j], lx = P[j].x - NR[j].x * E, lz = P[j].z - NR[j].z * E, rx = P[j].x + NR[j].x * E, rz = P[j].z + NR[j].z * E;
@@ -2016,22 +2243,27 @@ body {
         ri.push(q, q + 1, n4 + 1, q, n4 + 1, n4, q + 2, q + 3, n4 + 3, q + 2, n4 + 3, n4 + 2);
       }
     }
-    var slab = new THREE.Mesh(geoOf(sp, su, si), new THREE.MeshLambertMaterial({ map: layerTex, side: THREE.DoubleSide }));
+    var slab = new THREE.Mesh(geoOf(sp, su, si), new THREE.MeshLambertMaterial({ map: K.layerTex, side: THREE.DoubleSide }));
     slab.receiveShadow = true; world.add(slab);
-    world.add(new THREE.Mesh(geoOf(rp, ru, ri), new THREE.MeshPhongMaterial({ map: stripeTex('#ffffff', '#ff6fa5', 1), side: THREE.DoubleSide, shininess: 80 })));
-    var pil = [], caps = [];
-    for (i = 0; i < N; i += 30) {
+    world.add(new THREE.Mesh(geoOf(rp, ru, ri), new THREE.MeshPhongMaterial({ map: K.stripeTex('#ffffff', '#ff6fa5', 1), side: THREE.DoubleSide, shininess: 80 })));
+    var T0 = M.tower;
+    for (i = 0; i < N; i += 18) {
       if (inZone(i, park.b0 - 8, park.b1 + 8)) continue;
+      var dT = Math.hypot(P[i].x - T0.x, P[i].z - T0.z);
+      if (Math.abs(dT - 100) < 4 && H[i] > 30) {      // on the spiral: struts back to the tower instead of pillars
+        var a = Math.atan2(P[i].z - T0.z, P[i].x - T0.x), r0 = 100 - E, r1 = 60;
+        K.put('strut', { x: T0.x + Math.cos(a) * (r0 + r1) / 2, y: H[i] - 3, z: T0.z + Math.sin(a) * (r0 + r1) / 2, sv: [r0 - r1, 2.4, 3.2], ry: -a, c: PASTEL[(i / 18 | 0) % 6] });
+        continue;
+      }
+      if (i % 36) continue;
       [-1, 1].forEach(function (s) {
         var x = P[i].x + NR[i].x * s * (HW + 3.6), z = P[i].z + NR[i].z * s * (HW + 3.6), top = H[i] - 1;
         for (var q = 0; q < N; q += 3) if (H[q] < top - 6 && Math.hypot(P[q].x - x, P[q].z - z) < HW + 5) return;   // never down through a lower road
-        var c = PASTEL[(i / 30 + (s > 0 ? 3 : 0)) % PASTEL.length | 0];
-        pil.push({ x: x, y: top, z: z, sv: [1, top + 130, 1], c: c, sky: true });
-        caps.push({ x: x, y: top + 0.6, z: z, s: 2.9, c: c, sky: true });
+        var c = PASTEL[(i / 36 + (s > 0 ? 3 : 0)) % PASTEL.length | 0];
+        K.put('pole', { x: x, y: -110, z: z, sv: [5, top + 110, 5], c: c });
+        K.put('ball', { x: x, y: top + 0.6, z: z, s: 2.9, c: c });
       });
     }
-    var pg = new THREE.CylinderGeometry(1.8, 2.4, 1, 12); pg.translate(0, -0.5, 0);
-    instanced(pg, candy(0xffffff), pil); instanced(SPHL, candy(0xffffff), caps);
 
     // ---- the stretchy bridge: a sheet of mochi that sags and springs ----
     var b0 = park.b0, b1 = park.b1, rows = b1 - b0 + 1, bpos = new Float32Array(rows * 12), bu = [], bi = [], rpos = new Float32Array(rows * 12), rru = [], rri = [];
@@ -2044,15 +2276,15 @@ body {
       }
     }
     var sheetTex = canvasTex(64, 64, function (g) {
-      g.fillStyle = '#eb94bb'; g.fillRect(0, 0, 64, 64);                    // strawberry mochi: pink, with clear edges and centre line
-      for (var n = 0; n < 40; n++) { g.fillStyle = 'rgba(255,255,255,0.22)'; g.beginPath(); g.arc(Math.random() * 64, Math.random() * 64, 1.5 + Math.random() * 3, 0, 6.3); g.fill(); }
-      g.fillStyle = '#d94f8a'; g.fillRect(0, 0, 4, 64); g.fillRect(60, 0, 4, 64);
-      g.fillStyle = '#ffffff'; g.fillRect(5, 0, 2, 64); g.fillRect(57, 0, 2, 64); g.fillRect(30, 0, 4, 30);
+      g.fillStyle = '#ffd9e8'; g.fillRect(0, 0, 64, 64);                    // white-to-pink mochi, with clear edges and centre line
+      for (var n = 0; n < 40; n++) { g.fillStyle = 'rgba(255,255,255,0.4)'; g.beginPath(); g.arc(Math.random() * 64, Math.random() * 64, 1.5 + Math.random() * 3, 0, 6.3); g.fill(); }
+      g.fillStyle = '#f06fa6'; g.fillRect(0, 0, 4, 64); g.fillRect(60, 0, 4, 64);
+      g.fillStyle = '#ffffff'; g.fillRect(5, 0, 3, 64); g.fillRect(56, 0, 3, 64); g.fillRect(30, 0, 4, 30);
     });
     var bgeo = geoOf(bpos, bu, bi), rgeo = geoOf(rpos, rru, rri);
-    var sheet = new THREE.Mesh(bgeo, new THREE.MeshLambertMaterial({ map: sheetTex, side: THREE.DoubleSide }));
+    var sheet = new THREE.Mesh(bgeo, new THREE.MeshPhongMaterial({ map: sheetTex, side: THREE.DoubleSide, shininess: 40, specular: 0x333333 }));
     sheet.frustumCulled = false; sheet.receiveShadow = true; world.add(sheet);
-    var ropes = new THREE.Mesh(rgeo, new THREE.MeshPhongMaterial({ map: stripeTex('#ffe3ef', '#ff8fbf', 1), side: THREE.DoubleSide, transparent: true, opacity: 0.9 }));
+    var ropes = new THREE.Mesh(rgeo, new THREE.MeshPhongMaterial({ map: K.stripeTex('#ffe3ef', '#ff8fbf', 1), side: THREE.DoubleSide, transparent: true, opacity: 0.9 }));
     ropes.frustumCulled = false; world.add(ropes);
     function bridgeShape() {
       for (var r = 0; r < rows; r++) {
@@ -2083,12 +2315,14 @@ body {
       var g = new THREE.Group(), r = big ? 7 : 4.2;
       g.position.set(P[i].x + NR[i].x * lat, H[i] + 0.1, P[i].z + NR[i].z * lat); g.rotation.y = roadDir(i); world.add(g);
       mesh(new THREE.CylinderGeometry(r + 0.8, r + 1.2, 0.5, 32), candy(0xffffff), 0, 0.2, 0, 1, 1, 1, g);
-      var dome = mesh(SPH, mochi(big ? 0xff8fc0 : 0xffc2dc), 0, 0.3, 0, r, r * 0.32, r, g);
+      var dome = mesh(SPH, new THREE.MeshPhongMaterial({ color: big ? 0xff7fb6 : 0xffb8d6, shininess: 110, specular: 0xffffff }), 0, 0.3, 0, r, r * 0.32, r, g);
       mesh(new THREE.TorusGeometry(r * 0.62, 0.35, 8, 32), candy(0xffffff), 0, r * 0.27 + 0.3, 0, 1, 1, 1, g).rotation.x = Math.PI / 2;
       var p = { i: i, lat: lat, w: r + 0.6, big: big, dome: dome, r: r, sq: 0 };
       park.pads.push(p);
+      return p;
     }
-    pad(park.pad, 0, true);
+    var big = pad(park.pad, 0, true);
+    big.vyPow = C.rides.padVy; big.guide = C.rides.padGuide;
     var dashI = (park.pad - 22 + N) % N, dashTex = canvasTex(64, 64, function (g) {   // a dash panel lined up with the big pad
       g.fillStyle = '#ff8a1f'; g.fillRect(0, 0, 64, 64); g.strokeStyle = '#ffe14d'; g.lineWidth = 9;
       [4, 36].forEach(function (y) { g.beginPath(); g.moveTo(8, y); g.lineTo(32, y + 20); g.lineTo(56, y); g.stroke(); });
@@ -2098,9 +2332,7 @@ body {
     dash.position.set(P[dashI].x - NR[dashI].x * 6, H[dashI] + 0.12, P[dashI].z - NR[dashI].z * 6); world.add(dash);
     pads.push({ i: dashI, lat: -6 });
     tickers.push(function (dt) { dashTex.offset.y += dt * 1.6; });
-    var dropI = idxAt(-30, 30, 190);
-    pad(dropI, -8, false); pad(dropI, 8, false);
-    pad(idxAt(400, 33, -160), 0, false);
+    C.rides.smallPads.forEach(function (s) { var sp = pad(idxAt(s[0], s[1], s[2]), s[3], false); sp.guide = true; });
     tickers.push(function (dt) {
       park.pads.forEach(function (p) {
         p.sq = Math.max(0, p.sq - dt * 1.6);
@@ -2109,205 +2341,50 @@ body {
       });
     });
 
-    // ---- floating islands of kinako cake under the course ----
-    function island(x, z, y, r, top) {
-      var g = new THREE.Group(); g.position.set(x, y, z); world.add(g);
-      var t = new THREE.Mesh(new THREE.CylinderGeometry(r, r * 0.95, 6, 40), [new THREE.MeshLambertMaterial({ map: layerTex }), cream(top), kinako]);
-      t.position.y = -3; t.receiveShadow = true; g.add(t);
-      var b = new THREE.Mesh(new THREE.ConeGeometry(r * 0.94, r * 1.3, 20, 3), kinako); b.rotation.x = Math.PI; b.position.y = -6 - r * 0.65; g.add(b);
-      for (var n = 0; n < 6; n++) { var a = n * 1.1 + rnd(0, 0.8), rr = r * rnd(0.3, 0.7); mesh(DOD, kinakoDark, Math.cos(a) * rr, -12 - rnd(0, r * 0.45), Math.sin(a) * rr, rnd(r * 0.12, r * 0.22), undefined, undefined, g); }
-      islands.push({ x: x, z: z, y: y, r: r });
-      return g;
+    // ---- landmarks from the shared map ----
+    wpPlaza(K, M.plaza, [-420, 62, Math.PI]);
+    wpIsland(K, { x: T0.x, z: T0.z, y: T0.y, r: T0.r, top: 0xc8ecb4, under: 0xd7c8ff, falls: [0.9, 2.5, 3.9, 5.3] });
+    wpCakeTower(K, T0);
+    M.hops.forEach(function (h, n) { wpIsland(K, { x: h[0], z: h[1], y: h[2], r: h[3], top: n ? 0xfff4dc : 0xc8f2e0, under: 0xffc6dd, falls: [n ? 1.2 : 4.4] }); });
+    wpHookTower(K, M.hookIsle, C.rides.hook.topY);
+    wpWheel(K, M.wheel);
+    wpIsland(K, { x: M.loopIsle.x, z: M.loopIsle.z, y: M.loopIsle.y, r: M.loopIsle.r, top: 0xffe3ef, under: 0x9fdcff, falls: [1.3, 2.1] });
+    wpSauceTower(K, M.sauce);
+    M.attract.forEach(function (a, n) { wpIsland(K, { x: a[0], z: a[1], y: a[2], r: a[3], top: n ? 0xc8ecb4 : 0xfff4dc, under: n ? 0xd7c8ff : 0xffc6dd, falls: [1.6] }); });
+    M.spare.forEach(function (s, n) { wpIsland(K, { x: s[0], z: s[1], y: s[2], r: s[3], top: [0xc8ecb4, 0xfff4dc, 0xffe3ef, 0xc8f2e0][n % 4], under: [0xd7c8ff, 0xffc6dd, 0x9fdcff][n % 3], falls: [n * 1.7, n * 1.7 + 2.4] }); });
+    var cols = [0xff6fa5, 0x3fc9a0, 0xffc23d, 0x7d6bff, 0x4fb3f3];
+    function townOn(is, n, rMax) {                  // sweet shops scattered on an island, clear of every road
+      for (var k = 0; k < n; k++) {
+        var a = rnd(0, 6.283), r = Math.sqrt(Math.random()) * is[3] * (rMax || 0.8), x = is[0] + Math.cos(a) * r, z = is[1] + Math.sin(a) * r;
+        if (wpClear(x, z, is[2] - 5, is[2] + 40, 10)) wpHouse(K, x, is[2], z, rnd(4, 7), rnd(6, 14), cols[k % 5]);
+      }
     }
-    island(-20, 0, 18.4, 104, 0xfff0f6);       // the start plaza
-    island(420, -80, 0, 70, 0xc8ecb4);
-    island(250, -80, 20, 54, 0xffd6e8);
-    island(560, 95, 25, 56, 0xfff4dc);
-    island(215, 268, 30, 44, 0xc8f2e0);
-    island(215, 500, 0, 92, 0xffe6f0);
-    island(-120, 95, 5, 62, 0xc8ecb4);
-    island(-310, -150, -10, 70, 0xfff4dc);
-    island(80, -290, -20, 66, 0xc9f0ff);
-    island(720, -170, 5, 60, 0xffd6e8);
-    island(470, 420, -15, 74, 0xc8ecb4);
-    island(-300, 330, 0, 64, 0xfff0f6);
-    island(760, 330, 20, 50, 0xe8ddff);
-
-    // ---- the start plaza ----
-    var plazaTex = canvasTex(256, 256, function (g) {
-      var cs = ['#fff5f9', '#ffd6e7', '#e3fbef', '#fff6cf', '#efe6ff'];
-      for (var r = 8; r > 0; r--) { g.fillStyle = cs[r % 5]; g.beginPath(); g.arc(128, 128, r * 16, 0, 6.3); g.fill(); }
-      g.strokeStyle = 'rgba(255,255,255,0.85)'; g.lineWidth = 2;
-      for (var a = 0; a < 24; a++) { g.beginPath(); g.moveTo(128, 128); g.lineTo(128 + Math.cos(a / 24 * 6.283) * 128, 128 + Math.sin(a / 24 * 6.283) * 128); g.stroke(); }
+    M.attract.forEach(function (a) { townOn(a, 10); });
+    M.spare.forEach(function (s) { townOn(s, 6, 0.6); });
+    townOn([M.loopIsle.x, M.loopIsle.z, M.loopIsle.y, M.loopIsle.r], 12);
+    townOn([T0.x, T0.z, T0.y, T0.r], 8, 1);
+    C.arches.forEach(function (x, n) {
+      var ii = idxAt(x, 40, 160);
+      wpArch(K, P[ii].x, H[ii], P[ii].z, roadDir(ii), HW + 8, ['#ff6fa5', '#3fc9a0', '#ffc23d'][n % 3]);
     });
-    var plaza = new THREE.Mesh(new THREE.CircleGeometry(100, 64), new THREE.MeshLambertMaterial({ map: plazaTex }));
-    plaza.rotation.x = -Math.PI / 2; plaza.position.set(-20, 18.45, 0); plaza.receiveShadow = true; world.add(plaza);
-    for (var a = 0; a < 18; a++) {                // booths round the rim, off the road
-      var ang = a / 18 * Math.PI * 2, bx = -20 + Math.cos(ang) * 84, bz = Math.sin(ang) * 84;
-      if (Math.abs(bz) < 30) continue;
-      var bc = PASTEL[a % PASTEL.length];
-      mesh(new THREE.CylinderGeometry(5, 5, 7, 16), cream(0xfff8ef), bx, 22, bz);
-      mesh(new THREE.ConeGeometry(7, 7, 16), candy(bc), bx, 29, bz);
-      mesh(SPHL, candy(0xffffff), bx, 33, bz, 1.2);
-    }
-    [[-20, 52], [-20, -52]].forEach(function (s, n) {   // stacked-mochi statues with little faces
-      var g = new THREE.Group(); g.position.set(s[0], 18.5, s[1]); g.rotation.y = n ? 0 : Math.PI; world.add(g);
-      mesh(SPH, mochi(0xfff6f8), 0, 7, 0, 13, 8, 13, g); mesh(SPH, mochi(0xffbad3), 0, 19, 0, 10, 6.5, 10, g); mesh(SPH, mochi(0xc4ebb0), 0, 29, 0, 7.5, 5, 7.5, g);
-      var eye = cream(0x3a2a3a);
-      mesh(SPHL, eye, -2.6, 30, 6.6, 0.8, 1.1, 0.5, g); mesh(SPHL, eye, 2.6, 30, 6.6, 0.8, 1.1, 0.5, g);
-      mesh(SPHL, cream(0xff8fb1), -4.6, 28.6, 5.6, 1.4, 0.8, 0.5, g); mesh(SPHL, cream(0xff8fb1), 4.6, 28.6, 5.6, 1.4, 0.8, 0.5, g);
-    });
-    var fount = new THREE.Group(); fount.position.set(-85, 18.5, 40); world.add(fount);   // a whipped-cream fountain
-    mesh(new THREE.CylinderGeometry(12, 13, 3, 32), candy(0xc9b6ff), 0, 1.5, 0, 1, 1, 1, fount);
-    for (var f = 0; f < 4; f++) mesh(new THREE.TorusGeometry(8 - f * 1.8, 2.2 - f * 0.35, 10, 28), cream(0xfffaf2), 0, 4 + f * 2.6, 0, 1, 1, 1, fount).rotation.x = Math.PI / 2;
-    mesh(SPH, candy(0xff4d6d), 0, 15, 0, 2.6, 2.6, 2.6, fount);
-
-    // ---- landmarks ----
-    var tw = new THREE.Group(); tw.position.set(420, 0, -80); world.add(tw);       // three-tier mochi tower
-    [[0xfff4f7, 54, 26, 24], [0xffb3cd, 46, 72, 22], [0xbfe6a8, 37, 112, 19]].forEach(function (t) {
-      mesh(SPH, mochi(t[0]), 0, t[2], 0, t[1], t[3], t[1], tw);
-      mesh(new THREE.CylinderGeometry(t[1] + 3, t[1] + 4, 3, 48), cream(0xfffaf0), 0, t[2] - t[3] + 2, 0, 1, 1, 1, tw);
-    });
-    var berry = mesh(new THREE.ConeGeometry(14, 26, 24), candy(0xff3355), 0, 142, 0, 1, 1, 1, tw); berry.rotation.x = Math.PI;
-    mesh(SPH, candy(0xff3355), 0, 153, 0, 14, 7, 14, tw);
-    for (var l = 0; l < 6; l++) { var lf = mesh(new THREE.ConeGeometry(4, 12, 6), candy(0x48b04a), Math.cos(l) * 6, 160, Math.sin(l) * 6, 1, 1, 1, tw); lf.rotation.z = Math.cos(l) * 0.9; lf.rotation.x = Math.sin(l) * 0.9; }
-    var helix = [];
-    for (i = 0; i <= 80; i++) { var u = i / 80, ra = 57 - 22 * u; helix.push(new THREE.Vector3(Math.cos(u * 14) * ra, 8 + u * 120, Math.sin(u * 14) * ra)); }
-    mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(helix), 240, 3.4, 10), cream(0xfffbf3), 0, 0, 0, 1, 1, 1, tw);
-
-    var dg = new THREE.Group(); dg.position.set(250, 0, -80); world.add(dg);       // the dango tower
-    mesh(new THREE.CylinderGeometry(3.6, 3.6, 300, 12), cream(0xe5c28c), 0, 120, 0, 1, 1, 1, dg);
-    [[60, 42, 0xffa6c9], [146, 40, 0xfff7ee], [228, 37, 0xa5d98b]].forEach(function (b) {
-      mesh(SPH, mochi(b[2]), 0, b[0], 0, b[1], b[1] * 0.96, b[1], dg);
-      mesh(new THREE.TorusGeometry(b[1] + 5, 1.8, 8, 48), candy(0xfff07a), 0, b[0], 0, 1, 1, 1, dg).rotation.x = Math.PI / 2 + 0.25;
-    });
-    mesh(SPH, candy(0xc9873b), 0, 262, 0, 24, 6, 24, dg);
-
-    var hk = park.hook, hg = new THREE.Group(); hg.position.set(hk.cx, 0, hk.cz); world.add(hg);   // the hook tower
-    mesh(new THREE.CylinderGeometry(12, 15, 60, 32), mochi(0xfff3f7), 0, 52, 0, 1, 1, 1, hg);
-    mesh(SPH, mochi(0xffb3cd), 0, 84, 0, 17, 9, 17, hg);
-    var ring = mesh(new THREE.TorusGeometry(8, 2.2, 12, 40), new THREE.MeshBasicMaterial({ color: 0xff4f9a }), 0, hk.top.y, 0, 1, 1, 1, hg);
-    var ring2 = mesh(new THREE.TorusGeometry(11, 0.8, 8, 40), new THREE.MeshBasicMaterial({ color: 0xffffff }), 0, hk.top.y, 0, 1, 1, 1, hg);
-    var ht = 0;
-    tickers.push(function (dt) { ht += dt; ring.rotation.y += dt * 1.6; ring2.rotation.y -= dt; var s = 1 + 0.12 * Math.sin(ht * 5); ring.scale.set(s, s, s); });
-
-    var sg = new THREE.Group(); sg.position.set(-120, 0, 95); world.add(sg);        // strawberry-sauce tower with a mochi slide
-    mesh(new THREE.CylinderGeometry(22, 25, 165, 32), cream(0xfff8ee), 0, 87, 0, 1, 1, 1, sg);
-    mesh(SPH, candy(0xe8253f), 0, 172, 0, 27, 14, 27, sg);
-    for (i = 0; i < 9; i++) { var da = i / 9 * 6.283; mesh(SPH, candy(0xe8253f), Math.cos(da) * 21.5, 160 - (i % 3) * 14, Math.sin(da) * 21.5, 3.2, 12 + (i % 3) * 6, 3.2, sg); }
-    var flowTex = canvasTex(16, 64, function (g) { g.fillStyle = '#e8253f'; g.fillRect(0, 0, 16, 64); g.fillStyle = '#ff6b81'; for (var y = 0; y < 64; y += 16) g.fillRect(4, y, 5, 7); });
-    flowTex.repeat.set(1, 6);
-    mesh(new THREE.CylinderGeometry(3.4, 3.4, 160, 12), new THREE.MeshPhongMaterial({ map: flowTex, shininess: 120, specular: 0xaaaaaa }), 23.5, 85, 0, 1, 1, 1, sg);
-    mesh(new THREE.CylinderGeometry(14, 14, 0.8, 32), candy(0xe8253f), 28, 5.4, 0, 1, 1, 1, sg);
-    tickers.push(function (dt) { flowTex.offset.y += dt * 1.2; });
-    var slide = [];
-    for (i = 0; i <= 90; i++) { var su2 = i / 90; slide.push(new THREE.Vector3(Math.cos(su2 * 15) * 37, 158 - su2 * 146, Math.sin(su2 * 15) * 37)); }
-    mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(slide), 260, 4.2, 12), gummy(0xff8fc0), 0, 0, 0, 1, 1, 1, sg);
-
-    var fw = new THREE.Group(); fw.position.set(215, 130, 500); world.add(fw);      // the whipped-cream wheel
-    var wheel = new THREE.Group(); fw.add(wheel);
-    mesh(new THREE.TorusGeometry(100, 3.4, 12, 96), cream(0xfffaf3), 0, 0, 0, 1, 1, 1, wheel);
-    mesh(new THREE.TorusGeometry(88, 1.4, 8, 96), candy(0xff9ec4), 0, 0, 0, 1, 1, 1, wheel);
-    mesh(SPH, candy(0xff8fc0), 0, 0, 0, 13, 13, 9, fw);
-    var whips = [], cabins = [];
-    for (i = 0; i < 48; i++) { var wa = i / 48 * 6.283; whips.push({ x: Math.cos(wa) * 100, y: Math.sin(wa) * 100, z: 0, s: 5, sky: true }); }
-    wheel.add(instanced(SPHL, cream(0xffffff), whips));
-    for (i = 0; i < 12; i++) {
-      var ca = i / 12 * 6.283;
-      var spoke = mesh(new THREE.CylinderGeometry(0.9, 0.9, 100, 6), cream(0xfff2f7), Math.cos(ca) * 50, Math.sin(ca) * 50, 0, 1, 1, 1, wheel); spoke.rotation.z = ca - Math.PI / 2;
-      var cab = new THREE.Group(); cab.position.set(Math.cos(ca) * 100, Math.sin(ca) * 100, 0); wheel.add(cab);
-      mesh(new THREE.CylinderGeometry(6.5, 5.5, 8, 16), gummy(PASTEL[i % PASTEL.length]), 0, -7, 0, 1, 1, 1, cab);
-      mesh(SPH, gummy(PASTEL[(i + 2) % PASTEL.length]), 0, -2, 0, 6.5, 3, 6.5, cab);
-      cabins.push(cab);
-    }
-    [-1, 1].forEach(function (s) { [-1, 1].forEach(function (z) {
-      var leg = mesh(new THREE.CylinderGeometry(2.2, 3, 140, 10), candy(0xc9b6ff), s * 32, -64, z * 16, 1, 1, 1, fw); leg.rotation.z = s * 0.24; leg.rotation.x = -z * 0.1;
-    }); });
-    tickers.push(function (dt) { wheel.rotation.z += dt * 0.06; cabins.forEach(function (c) { c.rotation.z = -wheel.rotation.z; }); });
-
-    [70, 0, -70].forEach(function (x, n) {          // candy arches over the big drop
-      var ii = nearTrack(x, 190).i, col = ['#ff6fa5', '#3fc9a0', '#ffc23d'][n];
-      var arch = mesh(new THREE.TorusGeometry(HW + 8, 2.8, 12, 48, Math.PI), new THREE.MeshPhongMaterial({ map: stripeTex('#ffffff', col, 10), shininess: 110 }), x, H[ii], 190);
-      arch.rotation.y = Math.PI / 2;
-      [-1, 1].forEach(function (s) { mesh(new THREE.BoxGeometry(7, 7, 7), gummy(PASTEL[(n * 2 + (s > 0)) % PASTEL.length]), x, H[ii] + 1.5, 190 + s * (HW + 8)); });
-    });
-    var gx = 300, gi = idxAt(gx, 55, 0), cubes = [];                              // a gummy-block arch over the high road
-    for (i = 0; i <= 14; i++) { var ga = i / 14 * Math.PI; cubes.push({ x: gx, y: H[gi] + Math.sin(ga) * (HW + 10), z: Math.cos(ga) * (HW + 10), s: 4.2, ry: 0.3 * i, c: PASTEL[i % PASTEL.length], sky: true }); }
-    instanced(new THREE.BoxGeometry(1.6, 1.6, 1.6), gummy(0xffffff), cubes);
-
-    // ---- distant islands with rides of their own, sugar-glass bridges, a sea of cloud below ----
-    var far = [];
-    for (i = 0; i < 12; i++) {
-      var fa = i / 12 * 6.283 + rnd(-0.15, 0.15), fr = rnd(950, 1550), fx = 220 + Math.cos(fa) * fr, fz = 100 + Math.sin(fa) * fr, fy = rnd(-40, 200), rr2 = rnd(70, 140);
-      island(fx, fz, fy, rr2, PASTEL[i % PASTEL.length]);
-      far.push({ x: fx, y: fy, z: fz, r: rr2 });
-      var kind = i % 4, fc = PASTEL[(i + 3) % PASTEL.length];
-      if (kind === 0) { mesh(SPH, mochi(0xfff4f7), fx, fy + rr2 * 0.35, fz, rr2 * 0.6, rr2 * 0.38, rr2 * 0.6); mesh(SPH, mochi(fc), fx, fy + rr2 * 0.95, fz, rr2 * 0.45, rr2 * 0.3, rr2 * 0.45); }
-      else if (kind === 1) { mesh(new THREE.CylinderGeometry(3, 3, rr2 * 2.6, 8), cream(0xe5c28c), fx, fy + rr2 * 1.2, fz); [0.6, 1.3, 2].forEach(function (h, n) { mesh(SPH, mochi(PASTEL[(i + n) % 6]), fx, fy + rr2 * h, fz, rr2 * 0.32); }); }
-      else if (kind === 2) { mesh(SPH, gummy(fc), fx, fy, fz, rr2 * 0.7, rr2 * 0.7, rr2 * 0.7); mesh(new THREE.ConeGeometry(rr2 * 0.2, rr2 * 0.6, 16), candy(0xffffff), fx, fy + rr2 * 0.95, fz); }
-      else { var tr = mesh(new THREE.TorusGeometry(rr2 * 0.6, rr2 * 0.08, 12, 40), candy(fc), fx, fy + rr2 * 0.8, fz); tr.rotation.y = rnd(0, 3); mesh(new THREE.CylinderGeometry(rr2 * 0.06, rr2 * 0.1, rr2 * 0.4, 10), cream(0xfff8ee), fx, fy + 0.2 * rr2, fz); }
-    }
-    for (i = 0; i < 12; i += 3) {                  // translucent sugar bridges between neighbouring far islands
-      var A = far[i], B = far[(i + 1) % 12], mid = new THREE.Vector3((A.x + B.x) / 2, Math.max(A.y, B.y) + 90, (A.z + B.z) / 2);
-      var curve = new THREE.QuadraticBezierCurve3(new THREE.Vector3(A.x, A.y + 2, A.z), mid, new THREE.Vector3(B.x, B.y + 2, B.z));
-      var br = new THREE.Mesh(new THREE.TubeGeometry(curve, 60, 7, 8), sugar); world.add(br);
-    }
-    var cloudTex = canvasTex(256, 256, function (g) {
-      g.fillStyle = '#f4faff'; g.fillRect(0, 0, 256, 256);
-      for (var n = 0; n < 90; n++) {
-        var x = Math.random() * 256, y = Math.random() * 256, r = 12 + Math.random() * 40, gr = g.createRadialGradient(x, y, 0, x, y, r);
-        gr.addColorStop(0, ['rgba(255,255,255,1)', 'rgba(214,236,255,0.7)', 'rgba(255,255,255,0.9)'][n % 3]); gr.addColorStop(1, 'rgba(255,255,255,0)');
-        g.fillStyle = gr; [-256, 0, 256].forEach(function (ox) { [-256, 0, 256].forEach(function (oy) { g.save(); g.translate(ox, oy); g.fillRect(x - r, y - r, r * 2, r * 2); g.restore(); }); });
+    [[-262, 8, 17], [-150, -70, 18]].forEach(function (h) {   // lollipops on the stepping stones
+      for (var k = 0; k < 4; k++) {
+        var a = k * 1.6 + 0.4, x = h[0] + Math.cos(a) * 30, z = h[1] + Math.sin(a) * 30;
+        if (!wpClear(x, z, h[2] - 3, h[2] + 30, 6)) continue;
+        K.put('pole', { x: x, y: h[2], z: z, sv: [1.2, 13, 1.2], c: 0xffffff }); K.put('ball', { x: x, y: h[2] + 17, z: z, s: 4.4, c: PASTEL[k % 6] });
       }
     });
-    cloudTex.repeat.set(10, 10);
-    var sea = new THREE.Mesh(new THREE.PlaneGeometry(7000, 7000), new THREE.MeshLambertMaterial({ map: cloudTex }));
-    sea.rotation.x = -Math.PI / 2; sea.position.set(220, -120, 100); world.add(sea);
-    tickers.push(function (dt) { cloudTex.offset.x += dt * 0.004; });
-    var puffs = [];
-    for (i = 0; i < 130; i++) {                     // fluffy cloud sea underneath, rising into banks towards the horizon
-      var pa = rnd(0, 6.283), pr = rnd(250, 2600), px = 220 + Math.cos(pa) * pr, pz = 100 + Math.sin(pa) * pr, py = pr > 1500 ? rnd(-90, -10) : rnd(-112, -70);
-      for (var m = 0; m < 4; m++) puffs.push({ x: px + rnd(-60, 60), y: py + rnd(0, 22), z: pz + rnd(-60, 60), sv: [rnd(34, 80), rnd(16, 32), rnd(34, 80)], c: [0xffffff, 0xf2f8ff, 0xffffff][m % 3], sky: true });
-    }
-    for (i = 0; i < 40; i++) {                      // a few soft clouds drifting at road height, well clear of it
-      var ca2 = rnd(0, 6.283), cr2 = rnd(500, 900), cx2 = 220 + Math.cos(ca2) * cr2, cz2 = 100 + Math.sin(ca2) * cr2, cy2 = rnd(-10, 70);
-      if (!roadClear(cx2, cz2, cy2 - 40, cy2 + 40, 60)) continue;
-      for (m = 0; m < 3; m++) puffs.push({ x: cx2 + rnd(-30, 30), y: cy2 + rnd(-6, 6), z: cz2 + rnd(-30, 30), sv: [rnd(18, 34), rnd(9, 15), rnd(18, 34)], c: 0xffffff, sky: true });
-    }
-    instanced(SPHL, lam(0xffffff), puffs);
-
-    // ---- sweets dotted over the islands near the course ----
-    var lolli = [], sticks = [], drops = [], blobs = [], swirls = [];
-    islands.slice(0, 13).forEach(function (is) {
-      for (var n = 0; n < Math.round(is.r / 5); n++) {
-        var a = rnd(0, 6.283), r = Math.sqrt(Math.random()) * is.r * 0.85, x = is.x + Math.cos(a) * r, z = is.z + Math.sin(a) * r;
-        if (!roadClear(x, z, is.y - 3, is.y + 40, 8)) continue;
-        if (Math.hypot(x - 420, z + 80) < 60 || Math.hypot(x - 250, z + 80) < 48 || Math.hypot(x - 560, z - 95) < 20 || Math.hypot(x + 120, z - 95) < 44) continue;
-        var kind = n % 4, c = pick(PASTEL), s = rnd(0.7, 1.5);
-        if (kind === 0) { sticks.push({ x: x, y: is.y, z: z, sv: [1, 12 * s, 1], sky: true }); lolli.push({ x: x, y: is.y + 12 * s + 4 * s, z: z, s: 4.5 * s, ry: rnd(0, 3), c: c, sky: true }); }
-        else if (kind === 1) drops.push({ x: x, y: is.y, z: z, s: 3.4 * s, c: c, sky: true });
-        else if (kind === 2) blobs.push({ x: x, y: is.y + 2 * s, z: z, sv: [5 * s, 3 * s, 5 * s], c: [0xfff6f8, 0xffc4da, 0xc8ecb4][n % 3], sky: true });
-        else swirls.push({ x: x, y: is.y, z: z, s: 3 * s, c: [0xfffaf2, 0xffd6e8, 0xd9f4ff][n % 3], sky: true });
-      }
-    });
-    var stickG = new THREE.CylinderGeometry(0.35, 0.35, 1, 6); stickG.translate(0, 0.5, 0);
-    var lolG = new THREE.CylinderGeometry(1, 1, 0.5, 24); lolG.rotateX(Math.PI / 2);
-    var dropG = new THREE.ConeGeometry(1, 1.6, 16); dropG.translate(0, 0.8, 0);
-    var swG = new THREE.ConeGeometry(1, 2.6, 7, 1); swG.translate(0, 1.3, 0);
-    if (sticks.length) { instanced(stickG, cream(0xffffff), sticks); instanced(lolG, candy(0xffffff), lolli); }
-    if (drops.length) instanced(dropG, gummy(0xffffff), drops);
-    if (blobs.length) instanced(SPH, mochi(0xffffff), blobs);
-    if (swirls.length) instanced(swG, cream(0xffffff), swirls);
-
+    wpSky(K, -60, 20);
     var floaters = [];                               // mochi balloons bobbing in the air around the park
-    for (i = 0; i < 16; i++) {
-      var fa2 = rnd(0, 6.283), fr2 = rnd(300, 700), x2 = 220 + Math.cos(fa2) * fr2, z2 = 100 + Math.sin(fa2) * fr2, y2 = rnd(85, 170);
-      if (!roadClear(x2, z2, y2 - 60, y2 + 20, 30)) continue;
+    for (i = 0; i < 14; i++) {
+      var fa2 = rnd(0, 6.283), fr2 = rnd(350, 750), x2 = -60 + Math.cos(fa2) * fr2, z2 = 20 + Math.sin(fa2) * fr2, y2 = rnd(130, 220);
+      if (!wpClear(x2, z2, y2 - 60, y2 + 20, 30)) continue;
       var fm = mesh(SPH, mochi(pick([0xfff6f8, 0xffc4da, 0xc8ecb4, 0xfff0a8])), x2, y2, z2, 12, 9, 12);
-      floaters.push({ m: fm, y: y2, ph: rnd(0, 6) });
+      fm.castShadow = false; floaters.push({ m: fm, y: y2, ph: rnd(0, 6) });
     }
     var bt = 0;
     tickers.push(function (dt) { bt += dt; floaters.forEach(function (f) { f.m.position.y = f.y + Math.sin(bt * 0.8 + f.ph) * 4; f.m.scale.y = 9 + Math.sin(bt * 1.6 + f.ph) * 0.8; }); });
+    K.flush();
 
     // ---- overhead banners that say what each ride does ----
     function banner(i, l1, l2, col) {
@@ -2321,8 +2398,8 @@ body {
       var board = new THREE.Mesh(new THREE.PlaneGeometry(HW * 2 + 4, 6.4), new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide }));
       board.position.y = 14; board.rotation.y = Math.PI; g.add(board);
     }
-    banner(idxAt(30, 20, 0), 'ぷにぷにジャンプ', 'ダッシュ中にピンクのパッドへ → 上の道へ！', '#ff6fa5');
-    banner((hk.i0 - 22 + N) % N, 'もちフック', 'ドリフトボタン長押し → 出口で離す', '#3fc9a0');
+    banner((park.pad - 34 + N) % N, 'ぷにぷにジャンプ', 'ダッシュ中にピンクのパッドへ → 1つ上の段へ！', '#ff6fa5');
+    banner((park.hook.i0 - 22 + N) % N, 'もちフック', 'ドリフトボタン長押し → 出口で離す', '#3fc9a0');
     banner((park.b0 - 6 + N) % N, 'ビヨーン橋', 'まん中でドリフトボタン → 向こう岸へ', '#7d6bff');
     particles(0xfff0f8, 160, 1.5, 0.9);
   }
@@ -2601,7 +2678,7 @@ body {
     }
     if (k.bulletT > 0) {                       // rocket form: rides the racing line by itself
       if (k.hook) unhook(k, false);
-      if (k.air) { k.gy = H[k.idx]; k.bounce = false; }                 // fired off mid-flight: pick up the road again
+      if (k.air) { k.gy = H[k.idx]; k.bounce = false; k.guide = false; }                 // fired off mid-flight: pick up the road again
       k.bulletT -= dt; k.bf += 135 * dt / SPACING;
       k.bulletAge += dt;
       if (k.rank <= 4 && k.bulletAge > 2 && k.bulletT > 0.4) k.bulletT = 0.4;   // it carries you up to the front group, not past it
@@ -2670,6 +2747,11 @@ body {
     else {
       locate(k);
       tryCut(k);
+      if (park && k.air && k.guide) {            // a puni bounce carries you on round the road (up the spiral, a turn higher)
+        var gd = roadDir(k.idx + 3), gn = NR[k.idx], gp = Math.min(1, dt * 2.5);
+        k.h += wrapA(gd - k.h) * Math.min(1, dt * 5);
+        k.x -= gn.x * k.lat * gp; k.z -= gn.z * k.lat * gp;
+      }
       if (park && !k.air && Math.abs(k.lat) > HW + 1.5) {    // candy rails all the way round the park
         var po = Math.abs(k.lat) - HW - 1.5, ps = Math.sign(k.lat), pn = NR[k.idx];
         k.x -= pn.x * po * ps; k.z -= pn.z * po * ps; k.lat = (HW + 1.5) * ps; k.speed *= Math.exp(-1.2 * dt);
@@ -2721,7 +2803,7 @@ body {
       if (nt.d <= WALL && fwd < 0.35 * N) { k.total += fwd; k.idx = nt.i; }
     }
     locate(k); tryCut(k);
-    if (k.bounce) { k.bounce = false; k.squash = 0.16; }
+    if (k.bounce) { k.bounce = false; k.guide = false; k.squash = 0.16; }
     if (park ? !ok || Math.abs(k.lat) > HW + 4 : !k.cut && Math.abs(k.lat) > (k.human ? OUT : WALL + 1) && !medianSide(k)) {   // came down off the course
       if (k.human) { k.safe = { idx: k.idx, total: k.total, cut: null, ci: 0 }; respawn(k); return; }
       k.x = P[k.idx].x; k.z = P[k.idx].z; k.h = Math.atan2(T[k.idx].x, T[k.idx].z); k.lat = 0; k.speed = 6; k.trick = false;
@@ -2807,7 +2889,7 @@ body {
         karts.forEach(function (k) {
           if (bx.cool > 0 || k.remote || k.gone) return;
           var dx = k.x - bx.mesh.position.x, dz = k.z - bx.mesh.position.z;
-          if (dx * dx + dz * dz < 9) {
+          if (dx * dx + dz * dz < 9 && (!park || Math.abs(k.alt - bx.mesh.position.y + 2.2) < 5)) {
             if (k.human) sfx('item');
             bx.cool = 3; bx.mesh.visible = false;
             var got = null;
@@ -2822,7 +2904,7 @@ body {
         if (cn.cool > 0) { cn.cool -= dt; if (cn.cool <= 0) cn.mesh.visible = true; return; }
         for (var j = 0; j < karts.length; j++) {
           var k = karts[j], dx = k.x - cn.mesh.position.x, dz = k.z - cn.mesh.position.z;
-          if (!k.remote && dx * dx + dz * dz < 10 && k.alt - cn.h < 3) {
+          if (!k.remote && dx * dx + dz * dz < 10 && k.alt - cn.h < 3 && (!park || cn.h - k.alt < 3)) {
             cn.cool = 6; cn.mesh.visible = false; k.coins = Math.min(10, k.coins + 1);
             if (k.human) sfx('coin');
             break;
@@ -2854,7 +2936,7 @@ body {
         var o = oils[i]; o.age += dt;
         for (var j = 0; j < karts.length; j++) {
           var k = karts[j];
-          if ((k === o.owner && o.age < 1) || k.alt - k.gy > 2.5 || k.remote) continue;
+          if ((k === o.owner && o.age < 1) || k.alt - k.gy > 2.5 || k.remote || (park && Math.abs(k.alt - o.mesh.position.y) > 5)) continue;
           if (sweep(k.px - o.x, k.pz - o.z, k.x - o.x, k.z - o.z) < 3.6) { spin(k); scene.remove(o.mesh); oils.splice(i, 1); break; }
         }
       }
@@ -2864,7 +2946,7 @@ body {
         var hp = behind(hk, 4.6 * hk.sc);
         for (var j = 0; j < karts.length; j++) {
           var o2 = karts[j];
-          if (o2 !== hk && Math.hypot(o2.x - hp.x, o2.z - hp.z) < 3.3) { spin(o2); loseHeld(hk); break; }
+          if (o2 !== hk && Math.hypot(o2.x - hp.x, o2.z - hp.z) < 3.3 && (!park || Math.abs(o2.alt - hk.alt) < 5)) { spin(o2); loseHeld(hk); break; }
         }
       });
       // shells: green runs straight and bounces, red chases the kart ahead
@@ -2892,7 +2974,7 @@ body {
         s.mesh.position.set(s.x, (near ? s.target.gy : H[s.idx]) + 1.1, s.z); s.mesh.rotation.y += dt * 14;
         for (j = 0; j < karts.length && !gone; j++) {
           k = karts[j];
-          if ((k === s.owner && (s.type === 'red' || s.age < 0.6)) || k.respT > 0 || k.gone) continue;   // gliding karts can be hit too
+          if ((k === s.owner && (s.type === 'red' || s.age < 0.6)) || k.respT > 0 || k.gone || (park && Math.abs(k.alt - s.mesh.position.y + 1.1) > 8)) continue;   // gliding karts can be hit too
           if (sweep(s.px - k.px, s.pz - k.pz, s.x - k.x, s.z - k.z) < 3.8) { if (k.remote) sendFx('hit', k.peer, k.cslot || 0); else spin(k); gone = true; }
           else if (k.holding) {
             var bp = behind(k, 4.6 * k.sc);
@@ -3564,7 +3646,9 @@ body {
   setComfort(comfort);
   $('comfortBtn').addEventListener('click', function () { setComfort(!comfort); });
   $('pComfort').addEventListener('click', function () { setComfort(!comfort); });
+  var viewAt = null;                          // a fixed lookout for screenshots (window.mochi.view)
   function cam(c, dt) {
+    if (viewAt && c === cams[0]) { c.cam.position.set(viewAt[0], viewAt[1], viewAt[2]); c.cam.lookAt(viewAt[3], viewAt[4], viewAt[5]); if (c.cam.fov !== (viewAt[6] || 54)) { c.cam.fov = viewAt[6] || 54; c.cam.updateProjectionMatrix(); } return; }
     var k = c.k, h0 = c.h;                     // sit straight behind the kart
     c.h += wrapA(k.h - c.h) * Math.min(1, dt * 4.5);
     c.y += (k.alt - c.y) * Math.min(1, dt * (comfort ? 2 : 3));
